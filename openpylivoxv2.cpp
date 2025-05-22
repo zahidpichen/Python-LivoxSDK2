@@ -640,6 +640,66 @@ std::string get_work_mode_error() {
     return work_mode_error_message;
 }
 
+// Function to initialize the SDK once
+bool init_sdk(std::string host_ip = "") {
+    create_config_file(host_ip.empty() ? "192.168.1.10" : host_ip);
+    std::cout << "Initializing SDK..." << std::endl;
+    if (!LivoxLidarSdkInit(CONFIG_FILE_PATH.c_str())) {
+        std::cerr << "Failed to initialize Livox SDK" << std::endl;
+        recording_error_message = "Failed to initialize Livox SDK";
+        return false;
+    }
+    std::cout << "SDK initialized successfully." << std::endl;
+
+    // Register point cloud callback
+    SetLivoxLidarPointCloudCallBack(PointCloudRecordCallback, nullptr);
+    
+    // Register device discovery callback to connect to the LiDAR
+    SetLivoxLidarInfoChangeCallback(ConnectionCallback, nullptr);
+    std::cout << "Callbacks registered." << std::endl;
+
+    // Start the SDK
+    if (!LivoxLidarSdkStart()) {
+        std::cerr << "Failed to start Livox SDK" << std::endl;
+        LivoxLidarSdkUninit();
+        recording_error_message = "Failed to start Livox SDK";
+        return false;
+    }
+    std::cout << "SDK started successfully." << std::endl;
+    return true;
+}
+
+// Function to start recording without initializing SDK again
+bool start_recording_without_init() {
+    // Reset point cloud buffers
+    {
+        std::lock_guard<std::mutex> lock(point_cloud_mutex);
+        point_cloud_buffer.clear();
+        reflectivity_buffer.clear();
+        recording_error_message.clear();
+    }
+    
+    // Set the recording flag to true to start capturing points
+    is_recording.store(true);
+    return true;
+}
+
+// Function to stop recording without uninitializing SDK
+bool stop_recording_without_uninit() {
+    // Set the recording flag to false to stop capturing points
+    is_recording.store(false);
+    
+    // Wait a moment to ensure any pending callbacks have completed
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    return true;
+}
+
+// Function to uninitialize the SDK
+bool uninit_sdk() {
+    LivoxLidarSdkUninit();
+    return true;
+}
+
 // Define Python module
 PYBIND11_MODULE(openpylivoxv2, m) {
     m.doc() = "Python wrapper for Livox SDK2";
@@ -732,5 +792,33 @@ PYBIND11_MODULE(openpylivoxv2, m) {
           "Get the last error message from point cloud recording.\n"
           "Returns:\n"
           "    str: The error message."
+    );
+    
+    // Register SDK initialization functions
+    m.def("init_sdk", &init_sdk,
+          py::arg("host_ip") = "",
+          "Initialize the Livox SDK only once.\n"
+          "Args:\n"
+          "    host_ip: Optional IP address of the host computer. If not provided, default will be used.\n"
+          "Returns:\n"
+          "    bool: True if initialization was successful, False otherwise."
+    );
+
+    m.def("start_recording_without_init", &start_recording_without_init,
+          "Start recording point cloud data without initializing the SDK again.\n"
+          "Returns:\n"
+          "    bool: True if recording started successfully, False otherwise."
+    );
+
+    m.def("stop_recording_without_uninit", &stop_recording_without_uninit,
+          "Stop recording point cloud data without uninitializing the SDK.\n"
+          "Returns:\n"
+          "    bool: True if recording stopped successfully, False otherwise."
+    );
+
+    m.def("uninit_sdk", &uninit_sdk,
+          "Uninitialize the Livox SDK.\n"
+          "Returns:\n"
+          "    bool: True if uninitialization was successful, False otherwise."
     );
 }
